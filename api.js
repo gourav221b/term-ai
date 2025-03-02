@@ -1,59 +1,111 @@
 #!/usr/bin/env node
 
 const readline = require("readline");
+const fs = require("fs");
+const path = require("path");
+const { homedir } = require("os");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const marked = require("marked");
+const {markedTerminal}  = require("marked-terminal")
+marked.use(markedTerminal());
+
 const rl = readline.createInterface({
-	input: process.stdin,
-	output: process.stdout,
+  input: process.stdin,
+  output: process.stdout,
 });
 
-const exitString = `\x1b[1mThank you for using GenAI on the terminal. Checkout https://devgg.me for more amazing things :D  \x1b[0m`
+const exitString = `\x1b[1mThank you for using GenAI on the terminal. Checkout https://devgg.in for more amazing things :D  \x1b[0m`;
 
+// Path to store the API key in the user's home directory
+const configPath = path.join(homedir(), ".genai_config.json");
 
-async function run(context = "") {
-	if (context.trim() == "") return '"Please enter something!"';
-	try {
-		const url = "https://llamastudio.dev/api/clu9je3wp0001l908f1tlpixw";
-		const input = { input: context };
-
-		let response = await fetch(url, {
-			method: "POST",
-			body: JSON.stringify(input),
-		});
-		if (!response.ok) {
-			throw new Error();
-		}
-		const data = await response.text();
-		return data;
-	} catch (error) {
-		console.log("AI: Something went wrong here.");
-		chat();
-	}
+// Function to read the stored API key
+function getStoredApiKey() {
+  try {
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      return config.apiKey;
+    }
+  } catch (error) {
+    console.error("Error reading stored API key:", error);
+  }
+  return null;
 }
+
+// Function to store the API key in the user's home directory
+function storeApiKey(apiKey) {
+  try {
+    const config = { apiKey };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    console.log("✅ API key saved successfully.");
+  } catch (error) {
+    console.error("Error saving API key:", error);
+  }
+}
+
+// Function to get API Key from user
+async function getApiKey() {
+  return new Promise((resolve) => {
+    rl.question(
+      "🔑 Please enter your API key from https://aistudio.google.com/app/apikey: ",
+      (inputApiKey) => {
+        if (inputApiKey) {
+          storeApiKey(inputApiKey);
+          resolve(inputApiKey);
+        } else {
+          console.log("⚠️ API key is required. Please try again.");
+          resolve(getApiKey());
+        }
+      }
+    );
+  });
+}
+
+// Function to send input to AI and get response
+async function run(context, apiKey) {
+  if (!context.trim()) return "⚠️ Please enter something!";
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: context }] }] });
+    const response = result.response.candidates[0]?.content?.parts[0]?.text || "🤖 No response received!";
+    return response;
+  } catch (error) {
+    console.error("❌ AI: Something went wrong. Please try again.");
+    return "❌ AI Error!";
+  }
+}
+
+// Function to clean up special escape characters
 function unescapeString(inputString) {
-	return inputString.replace(/\\n/g, '\n    ')
-		.replace(/\\t/g, '\t')
-		.replace(/\\'/g, '\'')
-		.replace(/\\"/g, '\"')
-		.replace(/\\\\/g, '\\');
+  return inputString
+    .replace(/\\n/g, "\n    ")
+    .replace(/\\t/g, "\t")
+    .replace(/\\'/g, "'")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
 }
 
+// Chat loop
+function chat(apiKey) {
+  rl.question("\n🟢 You: ", async (userInput) => {
+    if (["exit", "bye"].includes(userInput.toLowerCase())) {
+      rl.close();
+      console.log(exitString);
+      return;
+    }
 
-function chat() {
-	rl.resume()
-	rl.question("\nYou: ", async (userInput) => {
-		if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "bye") {
-			rl.close(); console.log(exitString);
-		} else {
-			rl.pause()
-			let res = await run(userInput);
-			const guardString = res.toString().substring(1, res.length - 1);
-			const formattedString = unescapeString(guardString);
-			console.log("\x1b[34mAI:\x1b[0m", formattedString);
-			chat();
-		}
-	});
+    console.log("⏳ AI is thinking...");
+    const res = await run(userInput, apiKey);
+    console.log("\x1b[34m🤖 AI:\x1b[0m", marked.parse(unescapeString(res)));
 
+    chat(apiKey); // Continue chat loop
+  });
 }
+
+// ASCII Art Header
 console.log(`\x1b[34m
 ████████╗███████╗██████╗ ███╗   ███╗  █████╗ ██╗
 ╚══██╔══╝██╔════╝██╔══██╗████╗ ████║ ██╔══██╗██║
@@ -62,7 +114,16 @@ console.log(`\x1b[34m
    ██║   ███████╗██║  ██║██║ ╚═╝ ██║ ██║  ██║██║
    ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝ ╚═╝  ╚═╝╚═╝
   \x1b[0m                                             
-`)
-console.log(`\x1b[1mWelcome to GEN AI on the terminal. To stop type 'exit' or 'bye'\x1b[0m`);
-console.log(`\x1b[1mDisclaimer: AI replies are generated by Gemini and not custom trained. Please use AI responsibly!\x1b[0m`);
-chat(); // Start the chat
+`);
+
+console.log(`\x1b[1mWelcome to GEN AI on the terminal. To stop, type 'exit' or 'bye'\x1b[0m`);
+console.log(`\x1b[1m⚠️ Disclaimer: AI replies are generated by Gemini and not custom-trained. Please use AI responsibly!\x1b[0m`);
+
+// Start chat with stored or new API key
+(async () => {
+  let storedApiKey = getStoredApiKey();
+  if (!storedApiKey) {
+    storedApiKey = await getApiKey();
+  }
+  chat(storedApiKey);
+})();
